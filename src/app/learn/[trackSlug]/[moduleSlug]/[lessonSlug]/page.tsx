@@ -87,7 +87,7 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
           </div>
         </article>
 
-        <div className="min-w-0 lg:sticky lg:top-20 lg:self-start">
+        <div className="terminal-scroll min-w-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto">
           <LessonWorkspace
             key={lesson.id}
             lessonId={lesson.id}
