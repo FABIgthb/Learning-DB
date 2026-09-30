@@ -1,0 +1,267 @@
+// Learning platform schema for learn.fabi-pm.xyz
+//
+// Content hierarchy:   Track → Module → Lesson → LessonStep → CommandValidation
+// Learner state:       Learner → LessonProgress / StepCompletion / CommandAttempt
+// Ingestion audit:     ImportRun (written by the /admin/import "Scan & Sync" engine)
+//
+// Every content row carries `sourcePath` + `checksum` so the sync engine can
+// detect unchanged files (skip), changed files (update) and deleted files (archive).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Difficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// How a learner's command is checked against a step. All validations on a step must pass.
+/// Evaluation logic lives in src/lib/terminal/validation.ts and is shared by client and server.
+enum ValidationType {
+  /// Trimmed input must equal `expected` exactly.
+  EXACT
+  /// Inputs are tokenized: quoting/whitespace ignored, combined short flags expanded
+  /// (`ls -la` == `ls -a -l`), flag order ignored, positional order preserved.
+  NORMALIZED
+  /// Raw input must match the regular expression in `expected` (flags in `flags`).
+  INPUT_REGEX
+  /// Command stdout (ANSI stripped) must contain `expected`.
+  OUTPUT_CONTAINS
+  /// Command stdout (ANSI stripped, trailing whitespace trimmed) must equal `expected`.
+  OUTPUT_EQUALS
+  /// Command stdout (ANSI stripped) must match the regular expression in `expected`.
+  OUTPUT_REGEX
+  /// Shell working directory after the command must equal `expected`.
+  CWD_EQUALS
+  /// Path in `expected` must exist after the command (`flags`: "file" | "dir" to constrain type).
+  PATH_EXISTS
+  /// File at `target` must contain `expected` after the command.
+  FILE_CONTAINS
+  /// The first word of the input (the program) must equal `expected` (e.g. force the use of `rg`).
+  COMMAND_USED
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ImportStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+}
+
+model Track {
+  id          String        @id @default(cuid())
+  slug        String        @unique
+  title       String
+  summary     String
+  description String        @default("")
+  icon        String?
+  difficulty  Difficulty    @default(BEGINNER)
+  tags        String[]      @default([])
+  order       Int           @default(0)
+  status      ContentStatus @default(PUBLISHED)
+  sourcePath  String?       @unique
+  checksum    String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  modules Module[]
+
+  @@index([status, order])
+}
+
+model Module {
+  id         String        @id @default(cuid())
+  trackId    String
+  slug       String
+  title      String
+  summary    String        @default("")
+  order      Int           @default(0)
+  status     ContentStatus @default(PUBLISHED)
+  sourcePath String?       @unique
+  checksum   String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  track   Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@unique([trackId, slug])
+  @@index([trackId, status, order])
+}
+
+model Lesson {
+  id               String        @id @default(cuid())
+  moduleId         String
+  slug             String
+  title            String
+  summary          String        @default("")
+  /// Markdown/MDX body shown next to the terminal.
+  body             String
+  order            Int           @default(0)
+  estimatedMinutes Int           @default(5)
+  difficulty       Difficulty    @default(BEGINNER)
+  tags             String[]      @default([])
+  status           ContentStatus @default(PUBLISHED)
+  /// Mock file system + shell settings for the terminal simulator.
+  /// Shape: EnvironmentSpec in src/lib/terminal/types.ts (validated with zod on ingest).
+  environment      Json
+  sourcePath       String?       @unique
+  checksum         String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  module   Module           @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  steps    LessonStep[]
+  progress LessonProgress[]
+
+  @@unique([moduleId, slug])
+  @@index([moduleId, status, order])
+}
+
+/// A single task inside a lesson ("list hidden files", "find TODOs with rg", ...).
+/// Steps are completed strictly in `order`.
+model LessonStep {
+  id             String   @id @default(cuid())
+  lessonId       String
+  /// Stable key from frontmatter (e.g. "list-hidden"); keeps learner progress across re-imports.
+  key            String
+  order          Int
+  title          String
+  instruction    String
+  hint           String?
+  /// Reference solution, revealed on demand.
+  solution       String
+  /// Optional message shown when the step passes.
+  successMessage String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lesson      Lesson              @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  validations CommandValidation[]
+  completions StepCompletion[]
+  attempts    CommandAttempt[]
+
+  @@unique([lessonId, key])
+  @@index([lessonId, order])
+}
+
+model CommandValidation {
+  id             String         @id @default(cuid())
+  stepId         String
+  order          Int            @default(0)
+  type           ValidationType
+  expected       String
+  /// FILE_CONTAINS: path to inspect. Ignored by other types.
+  target         String?
+  /// INPUT_REGEX / OUTPUT_REGEX: RegExp flags. PATH_EXISTS: "file" | "dir".
+  flags          String?
+  /// Extra accepted values; the check passes if `expected` OR any alternative matches.
+  alternatives   String[]       @default([])
+  /// When true the command must exit with status 0.
+  requireSuccess Boolean        @default(true)
+  /// Shown to the learner when this particular check fails.
+  failureMessage String?
+
+  step LessonStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@index([stepId, order])
+}
+
+/// Anonymous learner identified by an httpOnly cookie. Can be linked to real auth later.
+model Learner {
+  id          String   @id @default(cuid())
+  displayName String?
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  lessonProgress  LessonProgress[]
+  stepCompletions StepCompletion[]
+  attempts        CommandAttempt[]
+}
+
+model LessonProgress {
+  id              String         @id @default(cuid())
+  learnerId       String
+  lessonId        String
+  status          ProgressStatus @default(IN_PROGRESS)
+  startedAt       DateTime       @default(now())
+  completedAt     DateTime?
+  /// Verified terminal history since the last reset (HistoryEntry[]); replayed to restore state on reload.
+  history         Json           @default("[]")
+  /// Steps already completed when `history` started (i.e. at the last terminal reset).
+  /// Client and server both replay `history` on top of this set, so they evaluate
+  /// every command against the same step and stay in lockstep.
+  baselineStepIds String[]       @default([])
+  updatedAt       DateTime       @updatedAt
+
+  learner Learner @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  lesson  Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([learnerId, lessonId])
+  @@index([lessonId, status])
+}
+
+model StepCompletion {
+  id          String   @id @default(cuid())
+  learnerId   String
+  stepId      String
+  /// The command that satisfied the step (after server-side replay verification).
+  command     String
+  completedAt DateTime @default(now())
+
+  learner Learner    @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  step    LessonStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@unique([learnerId, stepId])
+}
+
+model CommandAttempt {
+  id        String   @id @default(cuid())
+  learnerId String
+  stepId    String
+  input     String
+  passed    Boolean
+  exitCode  Int
+  createdAt DateTime @default(now())
+
+  learner Learner    @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  step    LessonStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@index([stepId, passed])
+  @@index([learnerId, createdAt])
+}
+
+model ImportRun {
+  id           String       @id @default(cuid())
+  status       ImportStatus @default(RUNNING)
+  contentRoot  String
+  startedAt    DateTime     @default(now())
+  finishedAt   DateTime?
+  filesScanned Int          @default(0)
+  created      Int          @default(0)
+  updated      Int          @default(0)
+  unchanged    Int          @default(0)
+  archived     Int          @default(0)
+  /// Array of { file, message, severity } produced by the parser/validator.
+  issues       Json         @default("[]")
+  triggeredBy  String?
+}
