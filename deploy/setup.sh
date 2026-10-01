@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run INSIDE the container (Debian 12) as root. Idempotent: re-run to update.
 set -euo pipefail
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
 APP_DIR=/opt/learn
 ENV_FILE=/etc/learn/env
 
@@ -18,8 +19,8 @@ systemctl enable --now postgresql >/dev/null
 mkdir -p /etc/learn
 if [ ! -f "$ENV_FILE" ]; then
   DB_PASS="$(openssl rand -hex 24)"
-  sudo -u postgres psql -qc "CREATE ROLE learn LOGIN PASSWORD '$DB_PASS';" 2>/dev/null || sudo -u postgres psql -qc "ALTER ROLE learn PASSWORD '$DB_PASS';"
-  sudo -u postgres psql -qc "CREATE DATABASE learn OWNER learn;" 2>/dev/null || true
+  runuser -u postgres -- psql -qc "CREATE ROLE learn LOGIN PASSWORD '$DB_PASS';" 2>/dev/null || runuser -u postgres -- psql -qc "ALTER ROLE learn PASSWORD '$DB_PASS';"
+  runuser -u postgres -- psql -qc "CREATE DATABASE learn OWNER learn;" 2>/dev/null || true
   cat > "$ENV_FILE" <<ENV
 DATABASE_URL=postgresql://learn:${DB_PASS}@127.0.0.1:5432/learn?schema=public
 APP_ORIGIN=https://learn.fabi-pm.xyz
