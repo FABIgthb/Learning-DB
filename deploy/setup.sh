@@ -36,7 +36,8 @@ set -a; . "$ENV_FILE"; set +a
 echo "==> Build"
 cd "$APP_DIR"
 git pull --ff-only || true
-npm ci --no-audit --no-fund
+# NODE_ENV=production is set above; the build still needs devDependencies (tailwind, prisma, tsx)
+npm ci --include=dev --no-audit --no-fund
 npx prisma db push --skip-generate
 npx prisma generate
 npm run build

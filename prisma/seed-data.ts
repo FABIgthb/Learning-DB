@@ -155,7 +155,7 @@ Flags can be combined: \`ls -la\` is the same as \`ls -l -a\`.
 - \`cd\` or \`cd ~\` — home
 - \`cd -\` — back to the previous directory
 
-> **Tip:** press <kbd>Tab</kbd> to complete file and directory names. Press it twice to see all candidates.`,
+> **Tip:** press `Tab` to complete file and directory names. Press it twice to see all candidates.`,
             steps: [
               {
                 key: "print-cwd",
@@ -456,7 +456,7 @@ bat $(fzf)                  # open the picked file with bat
 fzf --preview 'bat --color=always {}'
 \`\`\`
 
-In the finder: type to filter, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>Enter</kbd> to accept, <kbd>Esc</kbd> to cancel.
+In the finder: type to filter, `↑`/`↓` to move, `Enter` to accept, `Esc` to cancel.
 
 ## Search syntax
 
