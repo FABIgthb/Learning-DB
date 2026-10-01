@@ -1,0 +1,21 @@
+[Unit]
+Description=learn.fabi-pm.xyz (Next.js)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=learn
+WorkingDirectory=/opt/learn/.next/standalone
+EnvironmentFile=/etc/learn/env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/learn
+
+[Install]
+WantedBy=multi-user.target
